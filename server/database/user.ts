@@ -1,14 +1,15 @@
-import type { Database } from "db0"
-import type { UserInfo } from "#/types"
+import { Client } from "pg";  // 引入 pg 驱动
+import type { UserInfo } from "#/types";
 
 export class UserTable {
-  private db
-  constructor(db: Database) {
-    this.db = db
+  private db: Client;
+
+  constructor(db: Client) {
+    this.db = db;
   }
 
   async init() {
-    await this.db.prepare(`
+    await this.db.query(`
       CREATE TABLE IF NOT EXISTS user (
         id TEXT PRIMARY KEY,
         email TEXT,
@@ -17,53 +18,77 @@ export class UserTable {
         created INTEGER,
         updated INTEGER
       );
-    `).run()
-    await this.db.prepare(`
+    `);
+    await this.db.query(`
       CREATE INDEX IF NOT EXISTS idx_user_id ON user(id);
-    `).run()
-    logger.success(`init user table`)
+    `);
+    console.log(`init user table`);
   }
 
   async addUser(id: string, email: string, type: "github") {
-    const u = await this.getUser(id)
-    const now = Date.now()
+    const u = await this.getUser(id);
+    const now = Date.now();
     if (!u) {
-      await this.db.prepare(`INSERT INTO user (id, email, data, type, created, updated) VALUES (?, ?, ?, ?, ?, ?)`)
-        .run(id, email, "", type, now, now)
-      logger.success(`add user ${id}`)
-    } else if (u.email !== email && u.type !== type) {
-      await this.db.prepare(`UPDATE user SET email = ?, updated = ? WHERE id = ?`).run(email, now, id)
-      logger.success(`update user ${id} email`)
+      await this.db.query(
+        `INSERT INTO user (id, email, data, type, created, updated) VALUES ($1, $2, $3, $4, $5, $6)`,
+        [id, email, "", type, now, now]
+      );
+      console.log(`add user ${id}`);
+    } else if (u.email !== email || u.type !== type) {
+      await this.db.query(
+        `UPDATE user SET email = $1, updated = $2 WHERE id = $3`,
+        [email, now, id]
+      );
+      console.log(`update user ${id} email`);
     } else {
-      logger.info(`user ${id} already exists`)
+      console.log(`user ${id} already exists`);
     }
   }
 
   async getUser(id: string) {
-    return (await this.db.prepare(`SELECT id, email, data, created, updated FROM user WHERE id = ?`).get(id)) as UserInfo
-  }
-
-  async setData(key: string, value: string, updatedTime = Date.now()) {
-    const state = await this.db.prepare(
-      `UPDATE user SET data = ?, updated = ? WHERE id = ?`,
-    ).run(value, updatedTime, key)
-    if (!state.success) throw new Error(`set user ${key} data failed`)
-    logger.success(`set ${key} data`)
-  }
-
-  async getData(id: string) {
-    const row: any = await this.db.prepare(`SELECT data, updated FROM user WHERE id = ?`).get(id)
-    if (!row) throw new Error(`user ${id} not found`)
-    logger.success(`get ${id} data`)
-    return row as {
-      data: string
-      updated: number
+    const result = await this.db.query(
+      `SELECT id, email, data, created, updated FROM user WHERE id = $1`,
+      [id]
+    );
+    if (result.rows.length > 0) {
+      return result.rows[0] as UserInfo;
     }
   }
 
+  async setData(key: string, value: string, updatedTime = Date.now()) {
+    const result = await this.db.query(
+      `UPDATE user SET data = $1, updated = $2 WHERE id = $3`,
+      [value, updatedTime, key]
+    );
+    if (result.rowCount === 0) {
+      throw new Error(`set user ${key} data failed`);
+    }
+    console.log(`set ${key} data`);
+  }
+
+  async getData(id: string) {
+    const result = await this.db.query(
+      `SELECT data, updated FROM user WHERE id = $1`,
+      [id]
+    );
+    if (result.rows.length === 0) {
+      throw new Error(`user ${id} not found`);
+    }
+    console.log(`get ${id} data`);
+    return result.rows[0] as {
+      data: string;
+      updated: number;
+    };
+  }
+
   async deleteUser(key: string) {
-    const state = await this.db.prepare(`DELETE FROM user WHERE id = ?`).run(key)
-    if (!state.success) throw new Error(`delete user ${key} failed`)
-    logger.success(`delete user ${key}`)
+    const result = await this.db.query(
+      `DELETE FROM user WHERE id = $1`,
+      [key]
+    );
+    if (result.rowCount === 0) {
+      throw new Error(`delete user ${key} failed`);
+    }
+    console.log(`delete user ${key}`);
   }
 }
